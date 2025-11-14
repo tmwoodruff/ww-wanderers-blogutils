@@ -1,0 +1,172 @@
+{
+  "name": "ww-wanderers-blogutils",
+  "displayName": "WW-Wanders Blog Utils",
+  "description": "Utils for managing the WW-Wanderers blog",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.106.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "WW-Wanderers Blog Utils",
+      "properties": {
+        "ww-wanderers-blogutils.s3EndpointUrl": {
+          "type": "string",
+          "default": "",
+          "description": "S3-compatible endpoint URL (e.g. https://<account>.r2.cloudflarestorage.com). If not specified, system config or defaults will be used."
+        },
+        "ww-wanderers-blogutils.region": {
+          "type": "string",
+          "default": "auto",
+          "description": "Region string for SigV4 (R2 typically works with 'auto')."
+        },
+        "ww-wanderers-blogutils.accessKeyId": {
+          "type": "string",
+          "default": "",
+          "description": "Access Key ID. If not specified, system config will be used."
+        },
+        "ww-wanderers-blogutils.secretAccessKey": {
+          "type": "string",
+          "default": "",
+          "description": "Secret Access Key. If not specified, system config will be used."
+        },
+        "ww-wanderers-blogutils.forcePathStyle": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use path-style URLs (required for R2)."
+        },
+        "ww-wanderers-blogutils.imagesBucket": {
+          "type": "string",
+          "default": "ww-wanderers-assets-cyokuifedvc",
+          "description": "Bucket where images are stored",
+          "pattern": "^[a-z0-9.][a-z0-9.-]{2,62}$"
+        },
+        "ww-wanderers-blogutils.imagesPrefix": {
+          "type": "string",
+          "default": "images/",
+          "description": "Base prefix (folder) for images. Must end with /.",
+          "pattern": "^([[a-z0-9.-]+)+/$"
+        },
+        "ww-wanderers-blogutils.publicUrlBase": {
+          "type": "string",
+          "default": "https://assets.ww-wanderers.cc",
+          "description": "Base URL (not including `imagesPrefix`) for accessing images.",
+          "pattern": "^https?://[a-z0-9.]+(?:/.*[^/])?$"
+        },
+        "ww-wanderers-blogutils.imageSizeMax": {
+          "type": "integer",
+          "default": "2048",
+          "description": "Maximum size of an image's shortest side",
+          "minimum": 1
+        },
+        "ww-wanderers-blogutils.previewImageBaseNameFormat": {
+          "type": "string",
+          "default": "%s-240",
+          "description": "Format of preview image base names. %s is replaced by the source image base name.",
+          "pattern": "^[a-z0-9_.-]*%s[a-z0-9_.-]*$"
+
+        },
+        "ww-wanderers-blogutils.previewImageHeight": {
+          "type": "integer",
+          "default": "480",
+          "description": "Height, in pixels, of preview images.",
+          "minimum": 1,
+          "maximum": 2048
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "ww-wanderers-blogutils.selectImageFolder",
+        "title": "Select Image Folder",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "ww-wanderers-blogutils.createImageFolder",
+        "title": "Create Image Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "ww-wanderers-blogutils.refreshImages",
+        "title": "Refresh Images List",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ww-wanderers-blogutils.addImages",
+        "title": "Add Images",
+        "icon": "$(plus)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ww-wanderers-blogutils.addImages",
+          "when": "view == ww-wanderers-images",
+          "group": "navigation"
+        },
+        {
+          "command": "ww-wanderers-blogutils.refreshImages",
+          "when": "view == ww-wanderers-images",
+          "group": "navigation"
+        },
+        {
+          "command": "ww-wanderers-blogutils.selectImageFolder",
+          "when": "view == ww-wanderers-images",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ww-wanderers-blogutils",
+          "title": "Blog Utils",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "ww-wanderers-blogutils": [
+        {
+          "id": "ww-wanderers-images",
+          "name": "Blog Images",
+          "icon": "media/icon.png",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "ww-wanderers-images",
+        "contents": "No image folder is selected\n\n[Select Image Folder](command:ww-wanderers-blogutils.selectImageFolder)"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.106.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.930.0",
+    "sharp": "^0.34.5"
+  }
+}
