@@ -1,4 +1,4 @@
-import { S3Client, S3ClientConfig, ListObjectsV2Command, ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
+import { S3Client, S3ClientConfig, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Config, getConfig } from "./config";
 
 let cachedClient: S3Client | null = null;
@@ -203,6 +203,27 @@ export async function listDirectories(bucket: string, prefix: string) {
   return dirs;
 }
 
+export async function writeObject(
+  bucket: string, key: string, buffer: Buffer, contentType?: string, metadata?: {[key: string]: string}
+) {
+  const client = getS3Client();
+  await withRetry(() => client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+    Metadata: metadata
+  })));
+}
+
+export async function getMetadata(bucket: string, key: string) {
+  const client = getS3Client();
+  const res = await withRetry(() => client.send(new HeadObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  })));
+  return res.Metadata ?? {};
+}
 
 // Utility function to handle retries with exponential backoff
 export async function withRetry<T>(

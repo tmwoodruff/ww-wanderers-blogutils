@@ -1,91 +1,215 @@
 import * as vscode from 'vscode';
-import { getImagePreviewUrl, listFolders, listImages } from "../images";
+import { getImageMarkdown, getImagePreviewUrl, getImageUrl, ImageInfo, listFolders, listImages, uploadImages } from "../images";
+import { writeObject } from '../s3';
+import { getConfig } from '../config';
 
-interface ImageEntry {
-    name: string;
-}
+const FOLDER_ENTRY: ImageInfo = { name: "__FOLDER__", filename: "" };
 
-export class ImagesProvider implements vscode.TreeDataProvider<ImageEntry> {
-    private folder?: string;
-    private images?: ImageEntry[];
+export class ImagesProvider implements vscode.TreeDataProvider<ImageInfo>, vscode.TreeDragAndDropController<ImageInfo> {
+  folder?: string;
+  private images?: ImageInfo[];
 
-    private _onDidChangeTreeData: vscode.EventEmitter<ImageEntry | undefined | null | void> =
-        new vscode.EventEmitter<ImageEntry | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<ImageEntry | undefined | null | void> =
-        this._onDidChangeTreeData.event;
+  dropMimeTypes: readonly string[] = ["text/uri-list"];
+  dragMimeTypes: readonly string[] = ["text/uri-list"];
 
-    refresh(): void {
-        this.images = undefined;
-        this._onDidChangeTreeData.fire();
+  private _onDidChangeTreeData: vscode.EventEmitter<ImageInfo | undefined | null | void> =
+    new vscode.EventEmitter<ImageInfo | undefined | null | void>();
+  readonly onDidChangeTreeData: vscode.Event<ImageInfo | undefined | null | void> =
+    this._onDidChangeTreeData.event;
+
+  refresh(): void {
+    this.images = undefined;
+    this._onDidChangeTreeData.fire();
+  }
+  setFolder(folder: string): void {
+    if (folder !== this.folder) {
+      this.folder = folder;
+      this.refresh();
     }
-    setFolder(folder: string): void {
-        if (folder !== this.folder) {
-            this.folder = folder;
-            this.refresh();
+  }
+  getTreeItem(element: ImageInfo): vscode.TreeItem | Thenable<vscode.TreeItem> {
+    if (element === FOLDER_ENTRY) {
+      const item = new vscode.TreeItem(
+        this.folder ?? "<No folder selected>",
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.iconPath = vscode.ThemeIcon.Folder;
+      return item;
+    } else {
+      const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = vscode.ThemeIcon.File;
+      // if (this.folder) {
+      //     item.resourceUri = vscode.Uri.parse(getImageUrl(this.folder, element));
+      // }
+      return item;
+    }
+  }
+  async getChildren(element?: ImageInfo | undefined): Promise<ImageInfo[] | null | undefined> {
+    if (!this.folder) {
+      return null;
+    }
+    if (!element) {
+      return [FOLDER_ENTRY];
+    }
+    if (element === FOLDER_ENTRY) {
+      if (!this.images) {
+        await this._loadImages();
+      }
+      return this.images;
+    }
+    return null;
+  }
+  getParent?(element: ImageInfo): vscode.ProviderResult<ImageInfo> {
+    if (element === FOLDER_ENTRY) {
+      return null;
+    }
+    return FOLDER_ENTRY;
+  }
+  resolveTreeItem?(item: vscode.TreeItem, element: ImageInfo, token: vscode.CancellationToken): vscode.ProviderResult<vscode.TreeItem> {
+    if (element !== FOLDER_ENTRY && !item.tooltip && this.folder) {
+      const url = getImagePreviewUrl(this.folder, element);
+      const tooltip = new vscode.MarkdownString(`<img src="${url}" width="100"/>`);
+      tooltip.supportHtml = true;
+      item.tooltip = tooltip;
+    }
+    return item;
+  }
+  async handleDrag?(source: readonly ImageInfo[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    const folder = this.folder;
+    if (folder) {
+      const markdowns = [];
+      for (const image of source) {
+        if (image !== FOLDER_ENTRY) {
+          markdowns.push(await getImageMarkdown(folder, image));
         }
+      }
+      dataTransfer.set("text/plain", new vscode.DataTransferItem(markdowns.join("\n")));
     }
-    getTreeItem(element: ImageEntry): vscode.TreeItem | Thenable<vscode.TreeItem> {
-        return new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+  }
+  async handleDrop?(target: ImageInfo | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    const folder = this.folder;
+    if (!folder) {
+      return;
     }
-    async getChildren(element?: ImageEntry | undefined): Promise<ImageEntry[] | null | undefined> {
-        if (!this.folder) {
-            // vscode.window.showInformationMessage('No image folder is set');
-            return null;
+    const dataTransferItem = dataTransfer.get("text/uri-list");
+    if (!dataTransferItem) {
+      return undefined;
+    }
+    const uriList = await dataTransferItem.asString();
+    if (token.isCancellationRequested) {
+      return;
+    }
+    const imageUris: vscode.Uri[] = [];
+    for (const resource of uriList.split('\r\n')) {
+      try {
+        imageUris.push(vscode.Uri.parse(resource));
+      } catch {
+        // noop
+      }
+    }
+    await this._uploadImages(imageUris, folder);
+  }
+  async _uploadImages(imageUris: vscode.Uri[], folder: string) {
+    const uploadResults = await uploadImages(folder, imageUris);
+
+    let addedImages: boolean = false;
+    const errors: string[] = [];
+    for (const res of uploadResults) {
+      if (res.status === "SUCCESS") {
+        this.images?.push(res.image);
+        addedImages = true;
+      } else if (res.status === "ERROR") {
+        errors.push(`${res.imageUri.path}: ${res.error}`);
+      }
+    }
+
+    if (addedImages) {
+      this.refresh();
+    }
+
+    if (errors.length > 0) {
+      vscode.window.showErrorMessage("Error uploading images.", ...errors);
+    } else {
+      vscode.window.showInformationMessage(`Finished uploading images.`);
+    }
+  }
+  async _loadImages() {
+    const folder = this.folder;
+    if (!folder) {
+      this.images = [];
+    } else {
+      this.images = await listImages(folder);
+    }
+  }
+
+  async createFolder() {
+    const folder_name_pattern = /^[a-zA-Z0-9_.-]+$/;
+    const folder = await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      placeHolder: "Enter a folder name...",
+      validateInput: value => {
+        if (!folder_name_pattern.test(value)) {
+          return "Folder name should contain only letters, numbers, ., -, or _";
         }
-        if (!this.images) {
-            await this._loadImages();
-        }
-        return this.images;
+      }
+    });
+
+    if (!folder) { return; }
+
+    const config = getConfig();
+    await writeObject(config.imagesBucket, `${config.imagesPrefix}${folder}/`, Buffer.alloc(0));
+
+    this.setFolder(folder);
+  }
+
+  async addImages() {
+    const folder = this.folder;
+    if (!folder) {
+      vscode.window.showErrorMessage("No folder selected. Cannot add files.");
+      return;
     }
-    getParent?(element: ImageEntry): vscode.ProviderResult<ImageEntry> {
-        return null;
+
+    const imageUris = await vscode.window.showOpenDialog({
+      canSelectFiles: true, canSelectFolders: false, canSelectMany: true,
+      filters: { "Images": ["jpg", "jpeg", "png", "gif", "webp", "avif", "tiff"] }
+    });
+
+    if (!imageUris) {
+      return;
     }
-    resolveTreeItem?(item: vscode.TreeItem, element: ImageEntry, token: vscode.CancellationToken): vscode.ProviderResult<vscode.TreeItem> {
-        if (!item.tooltip && this.folder) {
-            const url = getImagePreviewUrl(this.folder, element.name);
-            const tooltip = new vscode.MarkdownString(`<img src="${url}" width="100"/>`);
-            tooltip.supportHtml = true;
-            item.tooltip = tooltip;
-        }
-        return item;
-    }
-    async _loadImages() {
-        const folder = this.folder;
-        if (!folder) {
-            this.images = [];
-        } else {
-            this.images = (await listImages(folder))
-                .map(img => ({ name: img }));
-        }
-    }
+
+    await this._uploadImages(imageUris, folder);
+  }
 }
 
 async function getQuickPickFolders(): Promise<vscode.QuickPickItem[]> {
-    return (await listFolders())
-        .map(f => ({ label: f, iconPath: vscode.ThemeIcon.Folder }));
+  return (await listFolders())
+    .map(f => ({ label: f, iconPath: vscode.ThemeIcon.Folder }));
 }
 
+
 export class ImagesView {
-    constructor(context: vscode.ExtensionContext) {
-        const provider = new ImagesProvider();
-        const view = vscode.window.createTreeView('ww-wanderers-images', { treeDataProvider: provider });
-        context.subscriptions.push(view);
+  constructor(context: vscode.ExtensionContext) {
+    const provider = new ImagesProvider();
+    const view = vscode.window.createTreeView(
+      'ww-wanderers-images',
+      { treeDataProvider: provider, canSelectMany: true, dragAndDropController: provider }
+    );
+    context.subscriptions.push(view);
 
-        vscode.commands.registerCommand("ww-wanderers-blogutils.selectImageFolder", async () => {
-            const folder = await vscode.window.showQuickPick(
-                getQuickPickFolders(), { placeHolder: "Select an Image Folder...", canPickMany: false }
-            );
-            if (folder) {
-                provider.setFolder(folder.label);
-            }
-        });
+    vscode.commands.registerCommand("ww-wanderers-blogutils.selectImageFolder", async () => {
+      const folder = await vscode.window.showQuickPick(
+        getQuickPickFolders(), { placeHolder: "Select an Image Folder...", canPickMany: false }
+      );
+      if (folder) {
+        provider.setFolder(folder.label);
+      }
+    });
 
-        vscode.commands.registerCommand("ww-wanderers-blogutils.refreshImages", () => { provider.refresh(); });
-
-        vscode.commands.registerCommand("ww-wanderers-blogutils.addImages", async () => {
-        });
-
-        vscode.commands.registerCommand("ww-wanderers-blogutils.createImageFolder", async () => {
-        });
-    }
+    vscode.commands.registerCommand("ww-wanderers-blogutils.refreshImages", () => { provider.refresh(); });
+    vscode.commands.registerCommand("ww-wanderers-blogutils.addImages", async () => { provider.addImages(); });
+    vscode.commands.registerCommand("ww-wanderers-blogutils.createImageFolder", async () => {
+      provider.createFolder();
+    });
+  }
 }
