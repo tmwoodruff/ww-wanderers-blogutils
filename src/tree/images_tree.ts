@@ -7,10 +7,10 @@ const FOLDER_ENTRY: ImageInfo = { name: "__FOLDER__", filename: "" };
 
 export class ImagesProvider implements vscode.TreeDataProvider<ImageInfo>, vscode.TreeDragAndDropController<ImageInfo> {
   folder?: string;
-  private images?: ImageInfo[];
+  images?: ImageInfo[];
 
   dropMimeTypes: readonly string[] = ["text/uri-list"];
-  dragMimeTypes: readonly string[] = ["text/uri-list"];
+  dragMimeTypes: readonly string[] = ["text/plain"];
 
   private _onDidChangeTreeData: vscode.EventEmitter<ImageInfo | undefined | null | void> =
     new vscode.EventEmitter<ImageInfo | undefined | null | void>();
@@ -77,13 +77,8 @@ export class ImagesProvider implements vscode.TreeDataProvider<ImageInfo>, vscod
   async handleDrag?(source: readonly ImageInfo[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
     const folder = this.folder;
     if (folder) {
-      const markdowns = [];
-      for (const image of source) {
-        if (image !== FOLDER_ENTRY) {
-          markdowns.push(await getImageMarkdown(folder, image));
-        }
-      }
-      dataTransfer.set("text/plain", new vscode.DataTransferItem(markdowns.join("\n")));
+      const markdown = await this.getMarkdownForImages(source);
+      dataTransfer.set("text/plain", new vscode.DataTransferItem(markdown));
     }
   }
   async handleDrop?(target: ImageInfo | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
@@ -161,7 +156,6 @@ export class ImagesProvider implements vscode.TreeDataProvider<ImageInfo>, vscod
 
     this.setFolder(folder);
   }
-
   async addImages() {
     const folder = this.folder;
     if (!folder) {
@@ -179,6 +173,27 @@ export class ImagesProvider implements vscode.TreeDataProvider<ImageInfo>, vscod
     }
 
     await this._uploadImages(imageUris, folder);
+  }
+  async getMarkdownForImages(images: readonly ImageInfo[]) {
+    const folder = this.folder;
+    if (!folder) {
+      return "";
+    }
+    let sourceImages = images;
+    if (images.length === 1 && images[0] === FOLDER_ENTRY && this.images) {
+      sourceImages = this.images;
+    }
+    const markdowns = [];
+    for (const image of sourceImages) {
+      if (image !== FOLDER_ENTRY) {
+        markdowns.push(await getImageMarkdown(folder, image));
+      }
+    }
+    let markdown = markdowns.join("\n");
+    if (markdown.length > 0) {
+      markdown += "\n";
+    }
+    return markdown;
   }
 }
 
@@ -210,6 +225,27 @@ export class ImagesView {
     vscode.commands.registerCommand("ww-wanderers-blogutils.addImages", async () => { provider.addImages(); });
     vscode.commands.registerCommand("ww-wanderers-blogutils.createImageFolder", async () => {
       provider.createFolder();
+    });
+    vscode.commands.registerTextEditorCommand("ww-wanderers-blogutils.imageTagsToEditor", async (editor) => {
+      const activeEditor = vscode.window.activeTextEditor;
+      if (!activeEditor) {
+        return;
+      }
+      let selectedImages: readonly ImageInfo[] = [];
+      if (view.selection.length > 0 && (view.selection.length > 1 || view.selection[0] !== FOLDER_ENTRY)) {
+        selectedImages = view.selection;
+      } else {
+        selectedImages = provider.images ?? [];
+      }
+      const text = await provider.getMarkdownForImages(selectedImages);
+      for (const selection of editor.selections) {
+        await editor.edit(edit => edit.insert(selection.active, text));
+      }
+    });
+    vscode.commands.registerCommand("ww-wanderers-blogutils.copyImageTagsToClipboard", async () => {
+      const selectedImages = view.selection ?? provider.images ?? [];
+      const text = await provider.getMarkdownForImages(selectedImages);
+      vscode.env.clipboard.writeText(text);
     });
   }
 }
