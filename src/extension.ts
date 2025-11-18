@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
 import { ImagesView } from './tree/images_tree';
+import blogImagePlugin from './markdown-it-blog-image';
+import { initialize_image_cache } from './images';
 
-export function activate(context: vscode.ExtensionContext) {
-	new ImagesView(context);
+export async function activate(context: vscode.ExtensionContext) {
+  await initialize_image_cache(context);
+
+  new ImagesView(context);
 
   return {
     extendMarkdownIt(md: any) {
@@ -11,4 +15,4 @@ export function activate(context: vscode.ExtensionContext) {
   };
 }
 
-export function deactivate() {}
+export function deactivate() { }

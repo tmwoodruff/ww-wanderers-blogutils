@@ -1,16 +1,16 @@
-import { Uri, workspace } from "vscode";
+import { ExtensionContext, FileDecoration, FileSystemError, FileType, Uri, workspace } from "vscode";
 import { Config, getConfig } from "./config";
 import { listKeys, listDirectories, writeObject } from "./s3";
 import sharp from "sharp";
+import { fstat } from "fs";
 
 
-const IMAGE_FILENAME_PATTERN = /^(.*?)(?:\.(\d+x\d+))?\.[^.]+$/;
+const IMAGE_FILENAME_PATTERN = /^(.*?)(?:\.\d+x\d+)?\.[^.]+$/;
 const FOLDER_PATTERN = /^.*\/([^/]+)\/$/;
 
 export interface ImageInfo {
   filename: string
   name: string;
-  size?: string;
 }
 
 export async function listImages(folder: string) {
@@ -26,12 +26,12 @@ export async function listImages(folder: string) {
   return images;
 }
 
-function parseImageInfo(imageFilename: string): ImageInfo | null {
+export function parseImageInfo(imageFilename: string): ImageInfo | null {
   const m = IMAGE_FILENAME_PATTERN.exec(imageFilename.substring(imageFilename.lastIndexOf("/") + 1));
   if (!m) {
     return null;
   }
-  return { filename: m[0], name: m[1], size: m[2] };
+  return { filename: m[0], name: m[1] };
 }
 
 export async function listFolders(): Promise<string[]> {
@@ -46,17 +46,10 @@ function getImageFilename(name: string, size: string) {
 
 async function getImageSize(folder: string, imageInfo: ImageInfo, config?: Config) {
   config = config ?? getConfig();
-  if (imageInfo.size) {
-    return imageInfo.size;
-  } else {
-    const response = await fetch(getImageUrl(folder, imageInfo, config));
-    const imageData = await response.arrayBuffer();
-    if (imageData) {
-      const img = sharp(imageData, { autoOrient: true });
-      const metadata = await img.metadata();
-      return metadata.width + "x" + metadata.height;
-    }
-  }
+  const imageUri = await getCachedImage(folder, imageInfo);
+  const img = sharp(imageUri.fsPath, { autoOrient: true });
+  const metadata = await img.metadata();
+  return metadata.width + "x" + metadata.height;
 }
 
 export function getImageKey(folder: string, image: ImageInfo, config?: Config) {
@@ -72,12 +65,14 @@ export function getPreviewImageKey(folder: string, image: ImageInfo, config?: Co
 
 export function getImageUrl(folder: string, image: ImageInfo, config?: Config) {
   config = config ?? getConfig();
-  return `${config.publicUrlBase}/${getImageKey(folder, image, config)}`;
+  const key = getImageKey(folder, image, config);
+  return `${config.publicUrlBase}/${encodeURI(key)}`;
 }
 
 export function getImagePreviewUrl(folder: string, image: ImageInfo, config?: Config) {
   config = config ?? getConfig();
-  return `${config.publicUrlBase}/${getPreviewImageKey(folder, image, config)}`;
+  const key = getPreviewImageKey(folder, image, config);
+  return `${config.publicUrlBase}/${encodeURI(key)}`;
 }
 
 export async function getImageMarkdown(folder: string, image: ImageInfo, config?: Config) {
@@ -125,7 +120,6 @@ export async function uploadImage(folder: string, imageUri: Uri, config: Config)
   const imageInfo: ImageInfo = {
     name: imageName,
     filename: getImageFilename(imageName, converted.imageSize),
-    size: converted.imageSize,
   };
   await writeObject(
     config.imagesBucket,
@@ -141,6 +135,8 @@ export async function uploadImage(folder: string, imageUri: Uri, config: Config)
     "image/webp",
     { "image-size": converted.previewSize }
   );
+  await writeCacheImage(folder, imageInfo, converted.image);
+
   return imageInfo;
 }
 
@@ -172,4 +168,90 @@ export async function uploadImages(
   }
 
   return results;
+}
+
+let CACHE_DIR: Uri | null = null;
+
+export async function initialize_image_cache(context: ExtensionContext) {
+  const baseDir = context.storageUri ?? context.globalStorageUri;
+  CACHE_DIR = Uri.joinPath(baseDir, "image_cache");
+  await workspace.fs.createDirectory(CACHE_DIR);
+}
+
+export async function getCachedImage(folder: string, image: ImageInfo): Promise<Uri> {
+  if (!CACHE_DIR) {
+    throw new Error("Cache dir is not set");
+  }
+
+  const fileUri = Uri.joinPath(CACHE_DIR, folder, `${image.name}.webp`);
+
+  let exists = false;
+  try {
+    await workspace.fs.stat(fileUri);
+    exists = true;
+  } catch (e) {
+    if (e instanceof FileSystemError && e.code === "FileNotFound") {
+      exists = false;
+    } else {
+      throw e;
+    }
+  }
+
+  if (!exists) {
+    const imageUrl = getImageUrl(folder, image);
+    const response = await fetch(getImageUrl(folder, image));
+    if (response.status >= 400) {
+      throw Error("Image not found: " + imageUrl);
+    }
+    const imageBlob = await response.blob();
+    await writeCacheImage(folder, image, await imageBlob.bytes(), true);
+  }
+
+  return fileUri;
+}
+
+
+async function writeCacheImage(folder: string, image: ImageInfo, content: Uint8Array, skipClean: boolean = false) {
+  if (!CACHE_DIR) {
+    throw new Error("Cache dir is not set");
+  }
+
+  const dirUri = Uri.joinPath(CACHE_DIR, folder);
+  const fileUri = Uri.joinPath(dirUri, `${image.name}.webp`);
+  await workspace.fs.createDirectory(dirUri);
+  await workspace.fs.writeFile(fileUri, content);
+
+  if (!skipClean) {
+    await _cleanCache(CACHE_DIR);
+  }
+}
+
+
+async function _cleanCache(dir: Uri) {
+  const expireTime = Date.now() - (30 * 24 * 60 * 60 * 1000);  // 30 days
+  let deletedAll = true;
+
+  for (const [f, fileType] of await workspace.fs.readDirectory(dir)) {
+    const fileUri = Uri.joinPath(dir, f);
+    if (fileType === FileType.Directory) {
+      const empty = await _cleanCache(fileUri);
+      if (empty) {
+        workspace.fs.delete(fileUri, {recursive: false, useTrash: false});
+      } else {
+        deletedAll = false;
+      }
+    } else if (fileType === FileType.File) {
+      const stat = await workspace.fs.stat(fileUri);
+      if (stat.mtime < expireTime) {
+        await workspace.fs.delete(fileUri);
+      } else {
+        deletedAll = false;
+      }
+    } else {
+      // Unexpected file type
+      deletedAll = false;
+    }
+  }
+
+  return deletedAll;
 }
