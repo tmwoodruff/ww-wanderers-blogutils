@@ -2,16 +2,8 @@
 
 VSCode extensions for managing blog images.
 
-## Features
+When building for windows, be sure to manually install windows sharp dependencies (should install `@img/sharp-win32-x64) before packaging:
 
-...
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-This extension contributes the following settings:
-
-* ...
+```
+npm i --cpu=x64 --os=win32 --optional sharp
+```
