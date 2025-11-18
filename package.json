@@ -2,6 +2,9 @@
   "name": "ww-wanderers-blogutils",
   "displayName": "WW-Wanders Blog Utils",
   "description": "Utils for managing the WW-Wanderers blog",
+  "repository": {
+    "url": "https://github.com/tmwoodruff/ww-wanderers-blogutils"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.106.0"
@@ -12,6 +15,7 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "markdown.markdownItPlugins": true,
     "configuration": {
       "title": "WW-Wanderers Blog Utils",
       "properties": {
@@ -69,7 +73,6 @@
           "default": "%s-240",
           "description": "Format of preview image base names. %s is replaced by the source image base name.",
           "pattern": "^[a-z0-9_.-]*%s[a-z0-9_.-]*$"
-
         },
         "ww-wanderers-blogutils.previewImageHeight": {
           "type": "integer",
@@ -100,6 +103,16 @@
         "command": "ww-wanderers-blogutils.addImages",
         "title": "Add Images",
         "icon": "$(plus)"
+      },
+      {
+        "command": "ww-wanderers-blogutils.copyImageTagsToClipboard",
+        "title": "Copy Image Tags in Clipboard",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "ww-wanderers-blogutils.imageTagsToEditor",
+        "title": "Insert Image Tags in Editor",
+        "icon": "$(insert)"
       }
     ],
     "menus": {
@@ -107,22 +120,32 @@
         {
           "command": "ww-wanderers-blogutils.addImages",
           "when": "view == ww-wanderers-images",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "ww-wanderers-blogutils.createImageFolder",
           "when": "view == ww-wanderers-images",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "ww-wanderers-blogutils.refreshImages",
           "when": "view == ww-wanderers-images",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "ww-wanderers-blogutils.selectImageFolder",
           "when": "view == ww-wanderers-images",
-          "group": "navigation"
+          "group": "navigation@4"
+        },
+        {
+          "command": "ww-wanderers-blogutils.copyImageTagsToClipboard",
+          "when": "view == ww-wanderers-images",
+          "group": "navigation@5"
+        },
+        {
+          "command": "ww-wanderers-blogutils.imageTagsToEditor",
+          "when": "view == ww-wanderers-images",
+          "group": "navigation@6"
         }
       ]
     },
@@ -161,6 +184,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.0",
