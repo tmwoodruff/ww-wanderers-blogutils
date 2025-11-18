@@ -60,7 +60,7 @@
           "type": "string",
           "default": "https://assets.ww-wanderers.cc",
           "description": "Base URL (not including `imagesPrefix`) for accessing images.",
-          "pattern": "^https?://[a-z0-9.]+(?:/.*[^/])?$"
+          "pattern": "^https?://[a-z0-9.-]+(?:/.*[^/])?$"
         },
         "ww-wanderers-blogutils.imageSizeMax": {
           "type": "integer",
