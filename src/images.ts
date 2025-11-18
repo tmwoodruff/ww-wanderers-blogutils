@@ -173,7 +173,7 @@ export async function uploadImages(
 let CACHE_DIR: Uri | null = null;
 
 export async function initialize_image_cache(context: ExtensionContext) {
-  const baseDir = context.storageUri ?? context.globalStorageUri;
+  const baseDir = context.globalStorageUri;
   CACHE_DIR = Uri.joinPath(baseDir, "image_cache");
   await workspace.fs.createDirectory(CACHE_DIR);
 }
