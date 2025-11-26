@@ -7,3 +7,9 @@ When building for windows, be sure to manually install windows sharp dependencie
 ```
 npm i --cpu=x64 --os=win32 --optional sharp
 ```
+
+To build:
+
+```
+vsce package
+```
