@@ -37,6 +37,7 @@ function blogImage (state: MarkdownIt.StateInline, silent: boolean) {
   const attrs: [string, string][] = [
     ['src', previewUrl],
     ['alt', ''],
+    ['title', imageInfo.name],
     ['height', '240']
   ];
   token.attrs = attrs;
