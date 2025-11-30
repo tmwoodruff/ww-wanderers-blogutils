@@ -24,7 +24,7 @@ function blogImage (state: MarkdownIt.StateInline, silent: boolean) {
 
   const src = m[1];
   const slashIdx = src.lastIndexOf("/");
-  const filename = src.slice(slashIdx + 1);
+  const filename = decodeURI(src.slice(slashIdx + 1));
   const folder = src.slice(0, slashIdx).replace(/.*\//, "");
   const imageInfo = parseImageInfo(filename);
   if (!imageInfo) {
